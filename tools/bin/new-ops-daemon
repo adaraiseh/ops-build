@@ -1,0 +1,125 @@
+#!/usr/bin/env python
+#
+# Copyright (C) 2015 Bert Vermeulen <bert@biot.com>
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+import os
+import sys
+import tempfile
+from subprocess import Popen, PIPE, check_output
+import shutil
+import re
+from datetime import datetime
+
+
+def new_daemon():
+    tmp = tempfile.mkdtemp()
+    tmp_dir = os.path.join(tmp, "ops-%s" % VARS['name'])
+    os.mkdir(tmp_dir)
+    try:
+        convert_dir(TEMPLATE_DIR, tmp_dir)
+        prev_dir = os.getcwd()
+        os.chdir(tmp)
+        tarball = make_tarball(tmp_dir)
+        os.chdir(prev_dir)
+        print("Your daemon is ready in " + tarball)
+    except Exception as e:
+        raise
+        print(e)
+    shutil.rmtree(tmp)
+
+
+def tmpl_file(filename):
+    template = open(filename).read()
+    out = re.sub(r'\${{([^}]+)}}', lambda x: str(VARS[x.group(1)]), template)
+
+    return out
+
+
+def convert_dir(tmpl_dir, dest_dir):
+    for item in os.listdir(tmpl_dir):
+        path_item = os.path.join(tmpl_dir, item)
+        path_dest = os.path.join(dest_dir, item)
+        if os.path.isdir(path_item):
+            os.mkdir(path_dest)
+            convert_dir(path_item, path_dest)
+        else:
+            new_content = tmpl_file(path_item)
+            new_item = item.replace('name', VARS['name'])
+            new_dest = os.path.join(dest_dir, new_item)
+            open(new_dest, 'w').write(new_content)
+
+
+def make_tarball(path):
+    tarball = os.path.join(OPS_BUILD, "ops-%s.tar.gz" % (VARS['name']))
+    cmd = "tar zcvf %s ops-%s" % (tarball, VARS['name'])
+    out, err = Popen(cmd, shell=True, stderr=PIPE).communicate()
+    if err:
+        raise Exception(err.decode())
+
+    return tarball
+
+
+def parse_gitconfig():
+    author = email = None
+    try:
+        author = check_output(["git", "config", "user.name"]).decode().strip()
+        email = check_output(["git", "config", "user.email"]).decode().strip()
+    except:
+        print("Please set your name and email in your git config")
+        sys.exit(1)
+    return author, email
+
+#
+# main
+#
+
+if len(sys.argv) < 2:
+    print("Usage: new-ops-daemon <name>")
+    sys.exit(1)
+
+name = sys.argv[1]
+if name.startswith('ops-'):
+    name = name[4:]
+if not re.match('^[a-z][a-z_0-9]{2,}$', name):
+    print("Invalid name.")
+    sys.exit(1)
+
+author, email = parse_gitconfig()
+
+tool_dir = os.path.split(os.path.realpath(__file__))[0]
+comp = tool_dir.split('/')
+if comp[-3:] != ['ops-build', 'tools', 'bin']:
+    print("This tool must be run from tools/bin in the ops-build repository.")
+    sys.exit(1)
+OPS_BUILD = '/'.join(comp[:-2])
+TEMPLATE_DIR = os.path.join(OPS_BUILD, 'tools/templates/new-ops-daemon')
+
+platform_file = os.path.join(OPS_BUILD, '.platform')
+if not os.path.exists(platform_file):
+    print("No platform configuration found, run 'make configure <platform>'.")
+    sys.exit(1)
+platform = open(platform_file).read().strip()
+
+VARS = {
+    'name': name,
+    'NAME': name.upper(),
+    'year': datetime.now().year,
+    'author': author,
+    'email': email,
+    'ops-build-path': OPS_BUILD,
+    'platform': platform,
+}
+
+new_daemon()

@@ -1,0 +1,17 @@
+To use this code:
+
+- Source the compile environment:
+
+	source new-ops-daemon.env
+
+- Create a Makefile:
+
+	cmake .
+
+- Build the code:
+
+	make
+
+- Deploy:
+
+	scp ops-${{name}} <your OpenSwitch instance>
